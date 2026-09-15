@@ -35,6 +35,7 @@ const state = {
   lastDataAt: 0,       // 最近一次解出数据的时刻（用于空闲收尾）
   idleTimer: 0,
   resultsOpen: false,
+  sheetDismissedAt: 0, // 用户上次关掉结果面板的时刻（避免同一批文件反复弹）
   result: null,
   raf: 0,
   wakeLock: null
@@ -233,6 +234,7 @@ function openResults() {
 
 function closeResults() {
   state.resultsOpen = false;
+  state.sheetDismissedAt = Date.now();
   $('result').hidden = true;
 }
 
@@ -631,8 +633,11 @@ function stopScanning() {
     : '已停止扫描';
   releaseWakeLock();
   refreshStatus();
-  // 扫描结束后才弹出结果面板（扫描中只用 toast + 状态徽标提示）
-  if (state.received.length && !state.resultsOpen) openResults();
+  // 扫描结束后才弹出结果面板；若用户刚关掉过、且没有新文件，就不要再打扰
+  const newest = state.received[state.received.length - 1];
+  if (state.received.length && !state.resultsOpen && newest && newest.at > state.sheetDismissedAt) {
+    openResults();
+  }
 }
 
 function resetProgress() {
@@ -790,6 +795,8 @@ function bindUI() {
   };
   $('btn-close-result').onclick = () => { closeResults(); startScanning(); };
   $('btn-close-sheet').onclick = () => closeResults();
+  $('btn-x').onclick = () => closeResults();
+  $('result').addEventListener('click', (e) => { if (e.target === $('result')) closeResults(); });
   $('btn-clear-result').onclick = () => clearResults();
   $('btn-results').onclick = () => openResults();
   $('btn-clear').onclick = () => resetProgress();

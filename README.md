@@ -17,6 +17,7 @@
 - **手势/开关**：手电筒（设备支持时）、切换前后摄像头、停止/继续、清空进度、日志面板。
 - **PWA**：1.9MB 的 WASM 缓存到本地，装到桌面后离线也能扫。
 - **结果面板只在扫描结束后弹出**：扫描中收到文件只做轻提示（toast）并继续接收，停止扫描（或 8 秒无新数据自动收尾）后才弹出结果面板，多文件可逐个预览/下载。
+- **移动端适配**：小屏下结果面板是底部抽屉（不遮住取景、带 ✕ 与点遮罩关闭、安全区适配），底部按钮放大，收到文件后关掉过面板不会对同一批文件反复弹出。
 
 ## 本地运行
 
@@ -69,12 +70,21 @@ BINARY=1 PAYLOAD_SIZE=120000 FRAMES=70 node test/gen-frames.mjs test/frames-bin
 # 2) 图片解码路径：码帧经 <input type="file"> 提交，断言文件名/长度/SHA-256 一致
 node test/decode-image.mjs test/frames-small
 
-# 3) 摄像头解码路径：码帧转 Y4M 喂给 Chrome 虚拟摄像头，走真实 getUserMedia
+# 3) UI 可见性回归（按真实渲染样式断言，不用 el.hidden）
+#    覆盖：结果面板初始不可见且不遮挡取景、收到文件只出 toast、toast 自动消失、
+#          ✕/点遮罩关闭、移动端视口下是贴底抽屉
+node test/ui-sheet.mjs
+
+# 4) 摄像头解码路径：码帧转 Y4M 喂给 Chrome 虚拟摄像头，走真实 getUserMedia
 node test/decode-camera.mjs test/frames-bin
 
-# 4) 对线上环境做同样验证（把 SITE_URL 指到部署地址即可）
+# 5) 对线上环境做同样验证（把 SITE_URL 指到部署地址即可）
 SITE_URL=https://cimbar-decoder.vercel.app/index.html node test/decode-camera.mjs test/frames-bin
+SITE_URL=https://cimbar-decoder.vercel.app/index.html node test/ui-sheet.mjs
 ```
+
+**坑（踩过）**：给面板加 `display:flex` 之类的作者样式会盖掉 UA 的 `[hidden]{display:none}`，面板就会常驻显示；
+断言必须查 `getComputedStyle(el).display` 与 `document.elementFromPoint` 遮挡，只查 `el.hidden` 会让这种 bug 静默通过。
 
 实测结果（2C/4G VPS + Chrome 151 无头）：120000 字节随机文件经摄像头路径 20 帧解码完成，
 SHA-256 与原文一致，模式自动锁定为 B，约 3 秒收完。

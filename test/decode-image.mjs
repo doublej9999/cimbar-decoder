@@ -46,6 +46,7 @@ try {
       name: item.name, size: item.blob.size, sha256: hex,
       lockedMode: cimbarApp.state.lockedMode, hits: cimbarApp.state.hits,
       resultVisible: !document.getElementById('result').hidden,
+      resultDisplay: getComputedStyle(document.getElementById('result')).display,
       title: document.getElementById('r-title').textContent,
       items: [...document.querySelectorAll('#r-list .file-item .fname')].map(e => e.textContent),
       modeBadge: document.getElementById('badge-mode').textContent,
@@ -58,7 +59,7 @@ try {
   assert(o.name === meta.name, `文件名还原正确 (${o.name})`);
   assert(o.size === meta.size, `长度一致 (${o.size}/${meta.size} 字节)`);
   assert(o.sha256 === meta.sha256, `SHA-256 逐字节一致 (${o.sha256.slice(0, 12)}…)`);
-  assert(o.resultVisible && o.items.includes(meta.name), `图片处理结束后弹出结果面板并列出文件（${o.title}）`);
+  assert(o.resultVisible && o.resultDisplay === 'flex' && o.items.includes(meta.name), `图片处理结束后结果面板真的可见并列出文件（display=${o.resultDisplay}, ${o.title}）`);
   assert(o.lockedMode > 0, '自动模式识别后已锁定模式：' + o.modeBadge);
   console.log(process.exitCode ? '[图片解码] 失败' : '[图片解码] 通过');
 } catch (e) {
