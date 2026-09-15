@@ -27,24 +27,29 @@ try {
   console.log('站点已就绪，线程数 =', await cdp.eval(sessionId, 'cimbarApp.state.workerCount'));
 
   await cdp.setFileInput(sessionId, '#file-input', frames);
+  // 图片路径是「离线处理」：等所有图片处理完、结果面板弹出后再断言
   await cdp.eval(sessionId, `(async () => {
     const t0 = Date.now();
-    while (!cimbarApp.state.result) { if (Date.now() - t0 > 600000) throw new Error('等待解码结果超时'); await new Promise(r => setTimeout(r, 300)); }
+    while (document.getElementById('result').hidden) {
+      if (Date.now() - t0 > 180000) throw new Error('等待结果面板超时');
+      await new Promise(r => setTimeout(r, 300));
+    }
     return true;
   })()`);
 
   const got = await cdp.eval(sessionId, `(async () => {
-    const blob = cimbarApp.state.result.blob;
-    const buf = await blob.arrayBuffer();
+    const item = cimbarApp.state.received[0];
+    const buf = await item.blob.arrayBuffer();
     const digest = await crypto.subtle.digest('SHA-256', buf);
     const hex = [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
     return JSON.stringify({
-      name: cimbarApp.state.result.name, size: blob.size, sha256: hex,
+      name: item.name, size: item.blob.size, sha256: hex,
       lockedMode: cimbarApp.state.lockedMode, hits: cimbarApp.state.hits,
       resultVisible: !document.getElementById('result').hidden,
-      nameShown: document.getElementById('r-name').textContent,
+      title: document.getElementById('r-title').textContent,
+      items: [...document.querySelectorAll('#r-list .file-item .fname')].map(e => e.textContent),
       modeBadge: document.getElementById('badge-mode').textContent,
-      sizeShown: document.getElementById('r-size').textContent
+      sizeShown: document.querySelector('#r-list .file-item .fsize') ? document.querySelector('#r-list .file-item .fsize').textContent : ''
     });
   })()`);
   const o = JSON.parse(got);
@@ -53,9 +58,9 @@ try {
   assert(o.name === meta.name, `文件名还原正确 (${o.name})`);
   assert(o.size === meta.size, `长度一致 (${o.size}/${meta.size} 字节)`);
   assert(o.sha256 === meta.sha256, `SHA-256 逐字节一致 (${o.sha256.slice(0, 12)}…)`);
-  assert(o.resultVisible && o.nameShown === meta.name, '结果卡片已展示');
+  assert(o.resultVisible && o.items.includes(meta.name), `图片处理结束后弹出结果面板并列出文件（${o.title}）`);
   assert(o.lockedMode > 0, '自动模式识别后已锁定模式：' + o.modeBadge);
-  console.log('[图片解码] 通过');
+  console.log(process.exitCode ? '[图片解码] 失败' : '[图片解码] 通过');
 } catch (e) {
   console.error('❌ 测试异常:', e.message);
   process.exitCode = 1;
