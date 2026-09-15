@@ -93,10 +93,14 @@ pre#log {
 .credit { color: #6e7681; font-size: 12px; margin-top: 24px; }
 .credit a { color: #58a6ff; }
 
-#result { display: flex; align-items: center; justify-content: center; }
+#result:not([hidden]) { display: flex; align-items: center; justify-content: center; }
 .card {
   background: var(--card); border: 1px solid var(--line); border-radius: 14px;
-  padding: 18px; width: 100%; max-width: 560px;
+  padding: 18px; width: 100%; max-width: 560px; position: relative;
+}
+.card-x {
+  position: absolute; top: 10px; right: 10px; padding: 6px 12px;
+  border-radius: 10px; font-size: 15px; line-height: 1.2; background: #1f2937;
 }
 .card h3 { margin: 0 0 6px; color: var(--accent); font-size: 18px; }
 .card .meta { display: flex; justify-content: space-between; gap: 10px; color: var(--dim); font-size: 12.5px; margin-bottom: 12px; }
@@ -127,3 +131,37 @@ pre#log {
 #toast.ok { border-color: var(--accent); }
 #toast b { color: var(--accent); }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, -8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* ---------- 移动端适配 ---------- */
+/* [hidden] 必须真的隐藏：作者样式里的 display 会盖掉 UA 的 [hidden]{display:none}，
+   #result 曾因此常驻显示、挡住摄像头取景。*/
+[hidden] { display: none !important; }
+
+#result { background: rgba(6, 9, 13, .55); }          /* 保留一部分取景可见 */
+#result .card {
+  max-height: 84vh; overflow-y: auto; overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 640px) {
+  /* 小屏：结果面板改成底部抽屉，不遮住整屏
+     注意选择器要写成 #result:not([hidden])，否则会被上面更高特异性的规则盖掉 */
+  #result:not([hidden]) { align-items: flex-end; }
+  #result { padding: 0; }
+  #result .card {
+    width: 100%; max-width: none; max-height: 76vh;
+    border-radius: 18px 18px 0 0; border-bottom: 0;
+    padding: 16px 16px calc(18px + env(safe-area-inset-bottom));
+  }
+  .card h3 { font-size: 17px; padding-right: 44px; }
+  #toast { top: auto; bottom: calc(78px + env(safe-area-inset-bottom)); }
+  #controls { gap: 6px; padding: 10px calc(10px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left)); }
+  #controls button, .card .row button { padding: 12px 14px; }
+  .file-item .row button { flex: 1 1 40%; }
+  .modes button { flex: 0 0 auto; }
+}
+
+@media (max-width: 380px) {
+  #controls { flex-wrap: wrap; }
+  #controls button { flex: 1 1 30%; }
+}

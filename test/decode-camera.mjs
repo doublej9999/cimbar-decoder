@@ -65,11 +65,14 @@ try {
     return true;
   })()`);
 
-  // 需求 1：扫描中不得弹出结果面板，必须有状态提示
+  // 需求 1：扫描中不得弹出结果面板（按真实渲染样式判断），必须有状态提示
   const mid = JSON.parse(await cdp.eval(sessionId, `JSON.stringify({
     scanning: cimbarApp.state.scanning,
     sheetHidden: document.getElementById('result').hidden,
-    toastVisible: !document.getElementById('toast').hidden,
+    sheetDisplay: getComputedStyle(document.getElementById('result')).display,
+    sheetCovering: (() => { const el = document.elementFromPoint(Math.round(innerWidth/2), Math.round(innerHeight/2));
+      return !!(el && el.closest('#result')); })(),
+    toastVisible: getComputedStyle(document.getElementById('toast')).display !== 'none',
     toastText: document.getElementById('toast').textContent,
     filesBadge: document.getElementById('badge-files').textContent,
     stateBadge: document.getElementById('badge-state').textContent,
@@ -100,6 +103,7 @@ try {
       received: cimbarApp.state.received.length,
       backend: cimbarApp.state.effectiveBackend, lockedMode: cimbarApp.state.lockedMode,
       sheetVisible: !document.getElementById('result').hidden,
+      sheetDisplay: getComputedStyle(document.getElementById('result')).display,
       title: document.getElementById('r-title').textContent,
       items: [...document.querySelectorAll('#r-list .file-item .fname')].map(e => e.textContent),
       hint: document.getElementById('hint').textContent,
@@ -115,10 +119,11 @@ try {
 
   assert(cam.includes('"hasStream":true'), '虚拟摄像头已打开：' + cam);
   assert(mid.scanning === true, '收到文件时扫描仍在继续（不中断）');
-  assert(mid.sheetHidden === true, '扫描中不弹出结果面板');
+  assert(mid.sheetHidden === true && mid.sheetDisplay === 'none', `扫描中结果面板真的不可见（hidden=${mid.sheetHidden}, display=${mid.sheetDisplay}）`);
+  assert(mid.sheetCovering === false, '扫描中结果面板没有遮挡取景区域');
   assert(mid.toastVisible === true && mid.toastText.includes('已收到'), '扫描中出现「已收到」轻提示：' + mid.toastText);
   assert(mid.stateBadge.includes('接收中') && mid.filesBadge.includes('文件 1'), `扫描中状态徽标可见（${mid.stateBadge} / ${mid.filesBadge}）`);
-  assert(got.sheetVisible === true, '扫描结束后自动弹出结果面板');
+  assert(got.sheetVisible === true && got.sheetDisplay === 'flex', `扫描结束后自动弹出结果面板（display=${got.sheetDisplay}）`);
   assert(got.title.includes('1 个文件') && got.items.includes(meta.name), `结果面板列出文件（${got.title}）`);
   assert(got.hits >= 1, `worker 有成功解码 (命中 ${got.hits} 次 / 共处理 ${got.frames} 帧)`);
   assert(got.name === meta.name, `文件名还原正确 (${got.name})`);
