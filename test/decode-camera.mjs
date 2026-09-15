@@ -15,6 +15,7 @@ const frames = readdirSync(DIR).filter((f) => f.endsWith('.png')).sort();
 const Y4M = process.env.Y4M_PATH || `/tmp/cimbar-camera-${meta.frames}.y4m`;
 const SIZE = Number(process.env.Y4M_SIZE || 1048);   // 必须偶数
 const FPS = Number(process.env.Y4M_FPS || 10);
+const IDLE_MS = Number(process.env.IDLE_FINISH_MS || 8000);   // 与 public/app.js 的 IDLE_FINISH_MS 对齐
 
 if (!existsSync(Y4M)) {
   // 用 image2 序列（frame_%03d.png）而不是 concat 列表：concat 对单张 PNG 只会产出极少数帧
@@ -57,40 +58,75 @@ try {
   })`);
   console.log('摄像头:', cam);
 
+  // 等第一个文件解出来
   await cdp.eval(sessionId, `(async () => {
     const t0 = Date.now();
     while (!cimbarApp.state.result) { if (Date.now() - t0 > 600000) throw new Error('等待解码结果超时'); await new Promise(r => setTimeout(r, 300)); }
     return true;
   })()`);
 
-  const got = await cdp.eval(sessionId, `(async () => {
-    const blob = cimbarApp.state.result.blob;
-    const buf = await blob.arrayBuffer();
+  // 需求 1：扫描中不得弹出结果面板，必须有状态提示
+  const mid = JSON.parse(await cdp.eval(sessionId, `JSON.stringify({
+    scanning: cimbarApp.state.scanning,
+    sheetHidden: document.getElementById('result').hidden,
+    toastVisible: !document.getElementById('toast').hidden,
+    toastText: document.getElementById('toast').textContent,
+    filesBadge: document.getElementById('badge-files').textContent,
+    stateBadge: document.getElementById('badge-state').textContent,
+    hint: document.getElementById('hint').textContent,
+    received: cimbarApp.state.received.length
+  })`));
+  console.log('扫描中状态:', JSON.stringify(mid));
+
+  // 模拟发送端结束：停掉摄像头数据流 → 验证「无新数据 8 秒自动收尾」，且收尾后才弹结果面板
+  await cdp.eval(sessionId, `(() => { cimbarApp.state.stream.getVideoTracks()[0].stop(); return true; })()`);
+  const idleStart = Date.now();
+  await cdp.eval(sessionId, `(async () => {
+    const t0 = Date.now();
+    while (cimbarApp.state.scanning) { if (Date.now() - t0 > 30000) throw new Error('等待空闲自动收尾超时'); await new Promise(r => setTimeout(r, 250)); }
+    return true;
+  })()`);
+  const idleSeconds = (Date.now() - idleStart) / 1000;
+  console.log(`空闲收尾耗时 ≈ ${idleSeconds.toFixed(1)}s（阈值 ${IDLE_MS / 1000}s）`);
+
+  const got = JSON.parse(await cdp.eval(sessionId, `(async () => {
+    const item = cimbarApp.state.received[0];
+    const buf = await item.blob.arrayBuffer();
     const digest = await crypto.subtle.digest('SHA-256', buf);
     const hex = [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
     return JSON.stringify({
-      name: cimbarApp.state.result.name, size: blob.size, sha256: hex,
+      name: item.name, size: item.blob.size, sha256: hex,
       frames: cimbarApp.state.frames, hits: cimbarApp.state.hits,
+      received: cimbarApp.state.received.length,
       backend: cimbarApp.state.effectiveBackend, lockedMode: cimbarApp.state.lockedMode,
-      badges: [document.getElementById('badge-state').textContent, document.getElementById('badge-mode').textContent, document.getElementById('badge-perf').textContent],
-      log: cimbarApp.getLog().slice(-6)
+      sheetVisible: !document.getElementById('result').hidden,
+      title: document.getElementById('r-title').textContent,
+      items: [...document.querySelectorAll('#r-list .file-item .fname')].map(e => e.textContent),
+      hint: document.getElementById('hint').textContent,
+      badges: [document.getElementById('badge-state').textContent, document.getElementById('badge-mode').textContent, document.getElementById('badge-files').textContent],
+      log: cimbarApp.getLog().slice(-7)
     });
-  })()`);
-  const o = JSON.parse(got);
-  console.log('解码结果:', JSON.stringify({ ...o, log: undefined }));
+  })()`));
+  console.log('解码结果:', JSON.stringify({ ...got, log: undefined }));
 
   const shot = await cdp.screenshot(sessionId);
   writeFileSync('test/evidence/camera-decode.png', shot);
-  writeFileSync('test/evidence/camera-decode.json', got);
+  writeFileSync('test/evidence/camera-decode.json', JSON.stringify({ mid, got }, null, 2));
 
   assert(cam.includes('"hasStream":true'), '虚拟摄像头已打开：' + cam);
-  assert(o.hits >= 1, `worker 有成功解码 (命中 ${o.hits} 次 / 共处理 ${o.frames} 帧)`);
-  assert(o.name === meta.name, `文件名还原正确 (${o.name})`);
-  assert(o.size === meta.size, `长度一致 (${o.size}/${meta.size} 字节)`);
-  assert(o.sha256 === meta.sha256, `SHA-256 逐字节一致 (${o.sha256.slice(0, 12)}…)`);
-  assert(o.lockedMode === meta.modeVal, `模式锁定正确 (${o.lockedMode} = ${meta.mode})`);
-  console.log('日志尾部:'); o.log.forEach((l) => console.log('   ' + l));
-  console.log('[摄像头解码] 通过');
+  assert(mid.scanning === true, '收到文件时扫描仍在继续（不中断）');
+  assert(mid.sheetHidden === true, '扫描中不弹出结果面板');
+  assert(mid.toastVisible === true && mid.toastText.includes('已收到'), '扫描中出现「已收到」轻提示：' + mid.toastText);
+  assert(mid.stateBadge.includes('接收中') && mid.filesBadge.includes('文件 1'), `扫描中状态徽标可见（${mid.stateBadge} / ${mid.filesBadge}）`);
+  assert(got.sheetVisible === true, '扫描结束后自动弹出结果面板');
+  assert(got.title.includes('1 个文件') && got.items.includes(meta.name), `结果面板列出文件（${got.title}）`);
+  assert(got.hits >= 1, `worker 有成功解码 (命中 ${got.hits} 次 / 共处理 ${got.frames} 帧)`);
+  assert(got.name === meta.name, `文件名还原正确 (${got.name})`);
+  assert(got.size === meta.size, `长度一致 (${got.size}/${meta.size} 字节)`);
+  assert(got.sha256 === meta.sha256, `SHA-256 逐字节一致 (${got.sha256.slice(0, 12)}…)`);
+  assert(got.lockedMode === meta.modeVal, `模式锁定正确 (${got.lockedMode} = ${meta.mode})`);
+  console.log('日志尾部:'); got.log.forEach((l) => console.log('   ' + l));
+  console.log(process.exitCode ? '[摄像头解码] 失败' : '[摄像头解码] 通过');
 } catch (e) {
   console.error('❌ 测试异常:', e.message);
   process.exitCode = 1;

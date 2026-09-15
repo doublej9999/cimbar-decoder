@@ -26,13 +26,17 @@
 <header id="statusbar">
   <span class="badge" id="badge-state">初始化…</span>
   <span class="badge" id="badge-mode">模式 自动</span>
+  <span class="badge" id="badge-files" hidden>文件 0</span>
   <span class="badge" id="badge-perf" hidden></span>
 </header>
+
+<div id="toast" hidden></div>
 
 <div id="progress-wrap" hidden><div id="progress"></div></div>
 
 <footer id="controls">
   <button id="btn-scan" class="primary" disabled>开始扫描</button>
+  <button id="btn-results" hidden>查看结果</button>
   <button id="btn-torch" hidden>手电筒</button>
   <button id="btn-camera" disabled>切换镜头</button>
   <button id="btn-file">图片解码</button>
@@ -67,7 +71,8 @@
     <li>本页需要 HTTPS 才能调用摄像头（本站已启用）。</li>
     <li>让对端用 cimbar 发送端（<a href="https://cimbar.org" target="_blank" rel="noreferrer">cimbar.org</a> / Android App）播放彩色码。</li>
     <li>把整块码放进取景框，尽量让四角都可见；手别抖，慢慢靠近。</li>
-    <li>进度条走满即完成，结果会自动弹出，可直接下载。</li>
+    <li>进度条走满即完成，顶部会提示「已收到」，此时扫描不中断，可继续收其它文件。</li>
+    <li>停止扫描（或 8 秒无新数据自动收尾）后才会弹出结果面板，可逐个下载/预览。</li>
     <li>没有摄像头也可以：把对方屏幕截图/照片保存到相册，用「图片解码」批量导入。</li>
   </ol>
 
@@ -83,12 +88,13 @@
 
 <section id="result" hidden>
   <div class="card">
-    <h3>解码完成</h3>
-    <div class="meta"><span id="r-name">—</span><span id="r-size"></span></div>
-    <div id="r-preview" class="preview"></div>
+    <h3 id="r-title">已收到文件</h3>
+    <div class="meta"><span id="r-sub"></span></div>
+    <div id="r-list" class="files"></div>
     <div class="row">
-      <button id="btn-download" class="primary">下载文件</button>
-      <button id="btn-close-result">继续扫描</button>
+      <button id="btn-close-result" class="primary">继续扫描</button>
+      <button id="btn-clear-result">清空列表</button>
+      <button id="btn-close-sheet">关闭</button>
     </div>
   </div>
 </section>

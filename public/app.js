@@ -8,6 +8,7 @@ const MODE_LABEL = { 0: '自动', 4: '4C', 8: '8C', 66: 'Bu', 67: 'Bm', 68: 'B' 
 const AUTO_MODES = [66, 68, 67, 4];              // 自动模式的轮换顺序（与上游一致）
 const IMAGE_MAX_DIM = 1600;                      // 取帧/图片最大边长
 const WASM_TIMEOUT_MS = 60000;
+const IDLE_FINISH_MS = 8000;                     // 收到文件后无新数据多久自动结束扫描（并弹出结果）
 
 const state = {
   wasmReady: false,
@@ -30,6 +31,10 @@ const state = {
   facing: 'environment',
   frames: 0, hits: 0, scans: 0, fps: 0,
   pending: new Map(),
+  received: [],        // 本次会话收到的文件（扫描结束后才弹结果面板）
+  lastDataAt: 0,       // 最近一次解出数据的时刻（用于空闲收尾）
+  idleTimer: 0,
+  resultsOpen: false,
   result: null,
   raf: 0,
   wakeLock: null
@@ -172,28 +177,29 @@ function humanSize(n) {
   return (n / 1024 / 1024).toFixed(2) + ' MB';
 }
 
-function deliver(name, blob) {
-  stopScanning();
-  if (state.result) URL.revokeObjectURL(state.result.url);
-  const url = URL.createObjectURL(blob);
-  state.result = { name, blob, url };
+function toast(msg, onClick, ms = 4000) {
+  const el = $('toast');
+  el.innerHTML = msg;
+  el.hidden = false;
+  el.onclick = onClick || null;
+  el.style.cursor = onClick ? 'pointer' : 'default';
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { el.hidden = true; }, ms);
+}
 
-  $('r-name').textContent = name;
-  $('r-size').textContent = humanSize(blob.size);
-
-  const prev = $('r-preview');
-  prev.innerHTML = '';
-  const lower = name.toLowerCase();
-  if (blob.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|avif|bmp)$/.test(lower)) {
+function renderPreview(container, item) {
+  container.innerHTML = '';
+  const lower = item.name.toLowerCase();
+  if (item.blob.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|avif|bmp)$/.test(lower)) {
     const img = new Image();
-    img.src = url;
-    img.alt = name;
-    prev.appendChild(img);
-  } else if (/\.(txt|md|csv|json|log|yaml|yml|ini|xml|tsv)$/.test(lower) || blob.type.startsWith('text/') || blob.size < 4096) {
+    img.src = item.url;
+    img.alt = item.name;
+    container.appendChild(img);
+  } else if (/\.(txt|md|csv|json|log|yaml|yml|ini|xml|tsv)$/.test(lower) || item.blob.type.startsWith('text/') || item.blob.size < 4096) {
     const pre = document.createElement('pre');
     pre.textContent = '读取中…';
-    prev.appendChild(pre);
-    blob.slice(0, 64 * 1024).text().then((t) => {
+    container.appendChild(pre);
+    item.blob.slice(0, 64 * 1024).text().then((t) => {
       const printable = t.replace(/[\u0000-\u0008\u000b-\u001f]/g, '·');
       pre.textContent = printable.length > 4000 ? printable.slice(0, 4000) + '\n…（已截断，下载看全文）' : printable;
     }).catch(() => { pre.textContent = '（无法以文本预览）'; });
@@ -201,10 +207,137 @@ function deliver(name, blob) {
     const d = document.createElement('div');
     d.className = 'none';
     d.textContent = '二进制文件，暂不支持预览，请直接下载。';
-    prev.appendChild(d);
+    container.appendChild(d);
   }
+}
+
+// 收到一个完整文件：只弹轻提示、不打断扫描、不弹结果面板
+// （结果面板只在扫描结束/用户主动点击时出现）
+function deliver(name, blob) {
+  const dup = state.received.find((it) => it.name === name && it.blob.size === blob.size);
+  if (dup) return;
+  const item = { name, blob, url: URL.createObjectURL(blob), at: Date.now() };
+  state.received.push(item);
+  state.result = item;                       // 兼容旧调用与自动化测试
+  state.lastDataAt = Date.now();
+  log(`收到文件 ${name} (${humanSize(blob.size)})，扫描继续`);
+  toast(`✅ 已收到 <b>${name}</b> · ${humanSize(blob.size)}　共 ${state.received.length} 个文件，点此查看`, () => openResults(), 5000);
+  refreshStatus();
+}
+
+function openResults() {
+  renderResults();
+  state.resultsOpen = true;
   $('result').hidden = false;
 }
+
+function closeResults() {
+  state.resultsOpen = false;
+  $('result').hidden = true;
+}
+
+function renderResults() {
+  const list = $('r-list');
+  list.innerHTML = '';
+  if (!state.received.length) {
+    const d = document.createElement('div');
+    d.className = 'none';
+    d.textContent = '还没有收到文件';
+    list.appendChild(d);
+  }
+  for (const item of state.received.slice().reverse()) {
+    const box = document.createElement('div');
+    box.className = 'file-item';
+    const head = document.createElement('div');
+    head.className = 'fhead';
+    const nm = document.createElement('span');
+    nm.className = 'fname';
+    nm.textContent = item.name;
+    const sz = document.createElement('span');
+    sz.className = 'fsize';
+    sz.textContent = humanSize(item.blob.size);
+    head.append(nm, sz);
+
+    const row = document.createElement('div');
+    row.className = 'row';
+    const dl = document.createElement('button');
+    dl.className = 'primary';
+    dl.textContent = '下载';
+    dl.onclick = () => {
+      const a = document.createElement('a');
+      a.href = item.url;
+      a.download = item.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    };
+    const pv = document.createElement('button');
+    pv.textContent = '预览';
+    const prev = document.createElement('div');
+    prev.className = 'preview';
+    prev.hidden = true;
+    pv.onclick = () => {
+      if (prev.hidden && !prev.dataset.filled) { renderPreview(prev, item); prev.dataset.filled = '1'; }
+      prev.hidden = !prev.hidden;
+      pv.textContent = prev.hidden ? '预览' : '收起';
+    };
+    row.append(dl, pv);
+    box.append(head, row, prev);
+    list.appendChild(box);
+  }
+  $('r-title').textContent = state.received.length ? `已收到 ${state.received.length} 个文件` : '还没有收到文件';
+  $('r-sub').textContent = state.scanning ? '扫描仍在进行，可继续接收' : '扫描已结束，可下载、预览或继续扫描';
+}
+
+function clearResults() {
+  for (const it of state.received) URL.revokeObjectURL(it.url);
+  state.received = [];
+  state.result = null;
+  renderResults();
+  refreshStatus();
+}
+
+/* 扫描中的状态提示：状态徽标 + 文件数 + 空闲倒计时提示 */
+function refreshStatus() {
+  const files = state.received.length;
+  const fb = $('badge-files');
+  fb.hidden = files === 0;
+  fb.textContent = '文件 ' + files;
+  $('btn-results').hidden = files === 0;
+  $('btn-results').textContent = `查看结果 ${files}`;
+  if (!state.scanning) return;
+
+  const st = $('badge-state');
+  if (files) { st.textContent = `接收中 · 已收 ${files}`; st.className = 'badge ok'; }
+  else if (state.hits) { st.textContent = '扫描中 · 已识别'; st.className = 'badge ok'; }
+  else { st.textContent = '扫描中 · 未识别到码'; st.className = 'badge warn'; }
+
+  const idle = Date.now() - state.lastDataAt;
+  if (files) {
+    const remain = Math.ceil((IDLE_FINISH_MS - idle) / 1000);
+    if (remain <= 4 && remain > 0) $('hint').textContent = `${remain} 秒内无新数据将自动结束扫描并显示结果`;
+    else if (idle < 1500) $('hint').textContent = '已收到数据，继续扫描中…（可继续接收其它文件）';
+  } else if (state.frames > 40 && state.hits === 0) {
+    $('hint').textContent = '未识别到码：把整块码框进取景框、四角可见，避开反光和抖动';
+  }
+}
+
+function noteData() { state.lastDataAt = Date.now(); }
+
+function startIdleWatch() {
+  stopIdleWatch();
+  state.lastDataAt = Date.now();
+  state.idleTimer = setInterval(() => {
+    if (!state.scanning) return;
+    refreshStatus();
+    if (!state.received.length) return;
+    if (Date.now() - state.lastDataAt >= IDLE_FINISH_MS) {
+      log('空闲收尾：结束扫描并显示结果');
+      stopScanning();
+    }
+  }, 500);
+}
+function stopIdleWatch() { if (state.idleTimer) clearInterval(state.idleTimer); state.idleTimer = 0; }
 
 /* ---------------- worker 池 ---------------- */
 function waitWorkers(timeout = 60000) {
@@ -251,6 +384,7 @@ function onWorkerMessage(event) {
 
   if (d.bytes && d.bytes.length) {
     state.hits++;
+    noteData();
     flashGuide('hit');
     if (state.mode === 0 && !state.lockedMode) {
       state.lockedMode = d.mode;
@@ -465,6 +599,7 @@ async function startScanning() {
     }
     state.scanning = true;
     state.modeCursor = 0;
+    closeResults();                      // 新一轮扫描先收起结果面板
     $('btn-scan').textContent = '停止扫描';
     $('btn-scan').classList.add('danger');
     $('guide').hidden = false;
@@ -474,6 +609,8 @@ async function startScanning() {
     requestWakeLock();
     startLoop();
     startPerfTimer();
+    startIdleWatch();
+    refreshStatus();
   } catch (e) {
     setStatus('摄像头失败', 'warn');
     $('hint').textContent = '无法打开摄像头：' + (e && e.message || e) + '（需 HTTPS 与授权）';
@@ -485,10 +622,17 @@ function stopScanning() {
   state.scanning = false;
   cancelAnimationFrame(state.raf);
   stopPerfTimer();
+  stopIdleWatch();
   $('btn-scan').textContent = '开始扫描';
   $('btn-scan').classList.remove('danger');
   setStatus(state.wasmReady ? '已停止' : '初始化…');
+  $('hint').textContent = state.received.length
+    ? `扫描结束：本次收到 ${state.received.length} 个文件`
+    : '已停止扫描';
   releaseWakeLock();
+  refreshStatus();
+  // 扫描结束后才弹出结果面板（扫描中只用 toast + 状态徽标提示）
+  if (state.received.length && !state.resultsOpen) openResults();
 }
 
 function resetProgress() {
@@ -589,6 +733,9 @@ async function decodeImageFiles(files) {
     setStatus(`图片解码 ${done}/${imgs.length}`);
   }
   setStatus('图片解码结束', 'ok');
+  refreshStatus();
+  // 图片路径是「离线处理」，处理完就直接弹结果面板
+  if (state.received.length) openResults();
   if (!$('progress-wrap').hidden) log('提示：单张静态图只提供极少量数据，文件通常需要多张/多帧才能凑齐。');
 }
 
@@ -641,16 +788,10 @@ function bindUI() {
     if (files && files.length) await decodeImageFiles(files);
     e.target.value = '';
   };
-  $('btn-close-result').onclick = () => { $('result').hidden = true; startScanning(); };
-  $('btn-download').onclick = () => {
-    if (!state.result) return;
-    const a = document.createElement('a');
-    a.href = state.result.url;
-    a.download = state.result.name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  };
+  $('btn-close-result').onclick = () => { closeResults(); startScanning(); };
+  $('btn-close-sheet').onclick = () => closeResults();
+  $('btn-clear-result').onclick = () => clearResults();
+  $('btn-results').onclick = () => openResults();
   $('btn-clear').onclick = () => resetProgress();
   $('btn-log').onclick = () => {
     const el = $('log');
@@ -751,5 +892,8 @@ window.cimbarApp = {
   stopScanning,
   getReport,
   getLog: () => logLines.slice(),
+  openResults,
+  closeResults,
+  refreshStatus,
   deliver
 };
