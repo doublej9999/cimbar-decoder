@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>cimbar 解码器 · 手机摄像头扫描</title>
+<meta name="description" content="在手机浏览器里用摄像头扫描 cimbar 彩色数据码并解码下载文件。基于 libcimbar 的 WASM 解码器，纯前端运行。">
+<meta name="theme-color" content="#0b0f14">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+
+<div id="stage">
+  <video id="video" playsinline autoplay muted></video>
+  <div id="guide" hidden>
+    <i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i>
+  </div>
+  <div id="hint">点击下方「开始扫描」授权摄像头</div>
+</div>
+
+<header id="statusbar">
+  <span class="badge" id="badge-state">初始化…</span>
+  <span class="badge" id="badge-mode">模式 自动</span>
+  <span class="badge" id="badge-perf" hidden></span>
+</header>
+
+<div id="progress-wrap" hidden><div id="progress"></div></div>
+
+<footer id="controls">
+  <button id="btn-scan" class="primary" disabled>开始扫描</button>
+  <button id="btn-torch" hidden>手电筒</button>
+  <button id="btn-camera" disabled>切换镜头</button>
+  <button id="btn-file">图片解码</button>
+  <button id="btn-more">更多</button>
+</footer>
+
+<section id="panel" hidden>
+  <h2>解码模式</h2>
+  <div class="modes" id="mode-picker">
+    <button data-mode="0" class="on">自动</button>
+    <button data-mode="68">B</button>
+    <button data-mode="66">Bu</button>
+    <button data-mode="67">Bm</button>
+    <button data-mode="4">4C</button>
+  </div>
+  <p class="note">扫码方与发送方使用相同模式速度最快；「自动」会轮换尝试（推荐）。</p>
+
+  <h2>采集后端</h2>
+  <div class="modes" id="backend-picker">
+    <button data-backend="auto" class="on">自动</button>
+    <button data-backend="webcodecs">WebCodecs</button>
+    <button data-backend="canvas">Canvas</button>
+  </div>
+  <p class="note" id="backend-note">自动：优先 WebCodecs 零拷贝取帧，异常时回落到 Canvas。iOS Safari 通常走 Canvas。</p>
+
+  <h2>性能</h2>
+  <div class="row"><label for="workers">解码线程数</label><input type="range" id="workers" min="1" max="4" step="1" value="2"><span id="workers-val">2</span></div>
+  <p class="note">每个线程是一份独立的 WASM 实例，越多越吃内存（每份约 40–80MB）。</p>
+
+  <h2>使用说明</h2>
+  <ol class="note">
+    <li>本页需要 HTTPS 才能调用摄像头（本站已启用）。</li>
+    <li>让对端用 cimbar 发送端（<a href="https://cimbar.org" target="_blank" rel="noreferrer">cimbar.org</a> / Android App）播放彩色码。</li>
+    <li>把整块码放进取景框，尽量让四角都可见；手别抖，慢慢靠近。</li>
+    <li>进度条走满即完成，结果会自动弹出，可直接下载。</li>
+    <li>没有摄像头也可以：把对方屏幕截图/照片保存到相册，用「图片解码」批量导入。</li>
+  </ol>
+
+  <h2>日志</h2>
+  <pre id="log" hidden></pre>
+  <div class="row"><button id="btn-log">显示日志</button><button id="btn-clear">清空进度</button></div>
+
+  <p class="credit">
+    解码器为 <a href="https://github.com/sz3/libcimbar" target="_blank" rel="noreferrer">sz3/libcimbar</a> v0.6.8
+    官方 WASM 构建（MPL-2.0），本页为独立的纯前端封装，所有数据都在本机处理。
+  </p>
+</section>
+
+<section id="result" hidden>
+  <div class="card">
+    <h3>解码完成</h3>
+    <div class="meta"><span id="r-name">—</span><span id="r-size"></span></div>
+    <div id="r-preview" class="preview"></div>
+    <div class="row">
+      <button id="btn-download" class="primary">下载文件</button>
+      <button id="btn-close-result">继续扫描</button>
+    </div>
+  </div>
+</section>
+
+<input type="file" id="file-input" accept="image/*" multiple hidden>
+
+<script>
+  // wasm 模块（在加载 vendor/cimbar_js.js 前定义，供 emscripten 复用）
+  var Module = {
+    onRuntimeInitialized: function () {
+      window.__cimbarReady = true;
+      if (window.__cimbarReadyCb) window.__cimbarReadyCb();
+    },
+    print: function () {},
+    printErr: function () {}
+  };
+</script>
+<script src="./vendor/cimbar_js.js"></script>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

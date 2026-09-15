@@ -1,0 +1,15 @@
+{
+  "name": "cimbar 解码器",
+  "short_name": "cimbar",
+  "description": "手机浏览器摄像头扫描 cimbar 彩色数据码并解码文件，纯前端 WASM 实现。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b0f14",
+  "theme_color": "#0b0f14",
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

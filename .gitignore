@@ -1,0 +1,7 @@
+node_modules/
+.vercel/
+test/frames*/
+test/evidence/
+*.y4m
+*.log
+.DS_Store
