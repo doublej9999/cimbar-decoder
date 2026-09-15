@@ -41,23 +41,36 @@ vercel deploy --prod --yes
 
 ## 自动化测试（真实浏览器 + 真实编解码）
 
-测试不是「页面能打开」级别，而是**真编码 → 真解码 → 逐字节比对**：
+测试不是「页面能打开」级别，而是**真编码 → 真解码 → SHA-256 逐字节比对**：
 
 ```bash
-# 1) 起静态服务
+# 0) 准备：站点静态服务 + 上游官方编码器（编码器用于生成测试码帧）
 python3 -m http.server 8899 --directory public &
+mkdir -p /tmp/cimbar-enc && cd /tmp/cimbar-enc   # 放入 releases/v0.6.8/cimbar_js.html 并改名 index.html
+python3 -m http.server 8898 --bind 127.0.0.1 &   # 编码器页面
 
-# 2) 用上游官方 WASM 编码器生成码帧（需先把 cimbar_js.html 放到 /tmp/cimbar-enc/index.html 并起 8898 端口）
-node test/gen-frames.mjs test/frames
+# 1) 生成测试码帧
+#    文本载荷（体积小、可压缩，通常 1 帧即可解出）
+PAYLOAD_SIZE=400 FRAMES=30 node test/gen-frames.mjs test/frames-small
+#    二进制随机载荷（zstd 压不动，fountain 流跨多帧，用于验证多帧累积重组）
+BINARY=1 PAYLOAD_SIZE=120000 FRAMES=70 node test/gen-frames.mjs test/frames-bin
 
-# 3a) 图片解码路径：把码帧写进 <input type=file>，断言还原内容一致
-node test/decode-image.mjs test/frames
+# 2) 图片解码路径：码帧经 <input type="file"> 提交，断言文件名/长度/SHA-256 一致
+node test/decode-image.mjs test/frames-small
 
-# 3b) 摄像头路径：码帧转 Y4M 喂给 Chrome 虚拟摄像头，走真实 getUserMedia
-node test/decode-camera.mjs test/frames
+# 3) 摄像头解码路径：码帧转 Y4M 喂给 Chrome 虚拟摄像头，走真实 getUserMedia
+node test/decode-camera.mjs test/frames-bin
+
+# 4) 对线上环境做同样验证（把 SITE_URL 指到部署地址即可）
+SITE_URL=https://cimbar-decoder.vercel.app/index.html node test/decode-camera.mjs test/frames-bin
 ```
 
-前提：本机有 Chrome/Chromium（`CHROME_BIN` 可覆盖路径），Node 22+（自带 WebSocket），ffmpeg。
+实测结果（2C/4G VPS + Chrome 151 无头）：120000 字节随机文件经摄像头路径 20 帧解码完成，
+SHA-256 与原文一致，模式自动锁定为 B，约 3 秒收完。
+
+前提：Chrome/Chromium（`CHROME_BIN` 可覆盖路径）、Node 22+（自带 WebSocket）、ffmpeg。
+注意：`--use-file-for-fake-video-capture` 的 Y4M 必须用 `-framerate N -start_number 0 -i frame_%03d.png` 逐帧生成，
+用 concat 列表只会产出极少数帧。
 
 ## 用法要点
 
