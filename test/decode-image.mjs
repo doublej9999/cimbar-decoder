@@ -1,5 +1,5 @@
 /* 端到端测试 1：图片解码路径
- * 把 test/frames*/ 下的码帧通过真实的 <input type=file> 提交给本站，
+ * 把 test/frames-xxx 下的码帧通过真实的 <input type="file"> 提交给本站，
  * 断言还原出的文件名、字节长度与 SHA-256 与原文完全一致。
  * 用法：node test/decode-image.mjs [帧目录]
  */

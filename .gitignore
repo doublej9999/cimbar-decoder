@@ -5,3 +5,5 @@ test/evidence/
 *.y4m
 *.log
 .DS_Store
+.vercel
+.env*
