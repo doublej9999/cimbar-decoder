@@ -41,6 +41,16 @@ vercel deploy --prod --yes
 
 部署后 `https://<域名>/` 可直接手机访问；HTTPS 由 Vercel 提供，摄像头权限即可正常授权。
 
+### Vercel Web Analytics
+
+已按 Vercel 官方 HTML 接入方式加入 Web Analytics：
+
+- 页面浏览自动统计
+- `scan_start`：用户开始摄像头扫描
+- `file_received`：成功收到文件（记录扩展名类别与字节数，不记录文件内容）
+
+首次使用需要在 Vercel 项目的 **Analytics** 页面点击 **Enable**；启用后脚本路径 `/_vercel/insights/script.js` 由 Vercel 提供。
+
 ### GitHub 自动部署
 
 仓库已连接到 Vercel 项目 `doub/cimbar-decoder`：
