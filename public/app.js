@@ -219,6 +219,7 @@ function deliver(name, blob) {
   if (dup) return;
   const item = { name, blob, url: URL.createObjectURL(blob), at: Date.now() };
   state.received.push(item);
+  if (typeof window.va === 'function') window.va('event', { name: 'file_received', data: { fileType: name.split('.').pop() || 'unknown', sizeBytes: blob.size } });
   state.result = item;                       // 兼容旧调用与自动化测试
   state.lastDataAt = Date.now();
   log(`收到文件 ${name} (${humanSize(blob.size)})，扫描继续`);
@@ -594,6 +595,7 @@ function startLoop() {
 async function startScanning() {
   if (state.scanning) return;
   try {
+    if (typeof window.va === 'function') window.va('event', { name: 'scan_start', data: { backend: chooseBackend() } });
     setStatus('启动中…');
     if (!state.stream) await startCamera();
     if (state.effectiveBackend !== 'canvas' && state.effectiveBackend !== 'webcodecs') {
